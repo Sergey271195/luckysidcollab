@@ -1,0 +1,39 @@
+{% extends '_base.html' %}
+
+{% block title %}Message{% endblock title %}
+
+{% block content %}
+
+<div class = 'container-fluid w-75 m-5'>
+{% csrf_token %}
+<form method = 'GET' class = 'm-5'>
+<select name='id_select'>
+    {% for id in user_id %}
+    <option>{{id}}</option>
+    {% endfor %}
+</select>
+    <input type = text name = 'message' />
+    <button type = 'submit' class = 'btn btn-success'>Send Message</button>
+</form>
+
+
+
+<div class = 'container'>
+<div class = 'h2 mb-3'><span >From</span>: {{username}}</div>
+</div>
+
+{% for update in updates %}
+<div class = 'container mb-3'>
+    <div><span class = 'font-weight-bold'>Date</span>: {{update.message.date}}</div>
+    <div><span class = 'font-weight-bold'>Message</span>: {{update.message.text}}</div>
+</div>
+
+{% endfor %}
+
+
+</div>
+{% endblock content %}
+
+{% block extrajs %}
+
+{% endblock extrajs %}

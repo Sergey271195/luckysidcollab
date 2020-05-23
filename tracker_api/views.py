@@ -1,13 +1,17 @@
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from django.views import View
+from django.views.generic.base import TemplateView
+from django.views.decorators.csrf import csrf_exempt
 
 import requests
 import os
 
 
 my_id = 540863534
-anton_id = 21509678
+anton_id = 215096781
+
+user_ids = [my_id, anton_id]
 
 class TelegramBot():
 
@@ -24,10 +28,10 @@ class TelegramBot():
         tracker_bot = telegram_response.json()
         return tracker_bot
 
-    def getUpdates(self):
+    def getUpdates(self, limit = 100):
 
         get_updates_url = os.path.join(self.url, 'getUpdates')
-        telegram_response = requests.get(get_updates_url)
+        telegram_response = requests.get(get_updates_url, params = {'limit': limit})
         tracker_update = telegram_response.json()
         return tracker_update
 
@@ -44,22 +48,26 @@ class MainApiView(View):
         return(HttpResponse('Tracker Api!'))
 
 
-class TelegramConnectionView(View):
+class TelegramConnectionView(TemplateView):
 
+    template_name = 'sendMessage.html'
     tgBot = TelegramBot()
 
+    @csrf_exempt
     def get(self, request, *args, **kwargs):
 
-        return(JsonResponse(self.tgBot.getUpdates()))
+        updates = self.tgBot.getUpdates()
+        message = request.GET.get('message')
+        user_id = request.GET.get('id_select')
         
-
-
-    def post(self, request, *args, **kwargs):
+        user_updates = list(filter(lambda x: str(x['message']['chat']['id']) == user_id, updates['result']))
+        user_first_name = user_updates[0]['message']['chat']['first_name']
         
-        # To send reponse use valid user_id
+        print(user_updates)
 
-        message = self.tgBot.sendMessage(my_id, 'Test123')
+        if message and message != '':
+            message = self.tgBot.sendMessage(user_id, message)
+        return(render(request, self.template_name, context = {'updates': user_updates, 'username': user_first_name, 'user_id': user_ids}))
 
-        return(JsonResponse(self.tgBot.getUpdates()))
 
     
