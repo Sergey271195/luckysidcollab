@@ -72,12 +72,7 @@ class TelegramConnectionView(TemplateView):
             return(JsonResponse({'update': user_updates, 'username': user_first_name}))
         
         else:
-
-            message = request.GET.get('message')
-            user_id = request.GET.get('id_select')
-
-            if message and message != '':
-                message = self.tgBot.sendMessage(user_id, message)
+            
             return(render(request, self.template_name, context = {'user_id': self.tgBot.getUniqueIds()}))
 
 
