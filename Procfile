@@ -1,1 +1,1 @@
-wsgi: web: gunicorn dictionary.wsgi
+web: gunicorn dictionary.wsgi
