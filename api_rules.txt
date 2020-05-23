@@ -1,0 +1,27 @@
+Making requests to API:
+
+In order to get or create user using telegram_id: 
+
+    url = 'host' + 'user/' params = {'telegram_id' : valid telegram id}
+
+    method = 'GET'
+
+    in case the user exists in db - user instance is returned 
+
+    else - new user is added to db
+
+In order to update profile with new expense:
+
+    url = 'host' + 'expense/' data = {'telegram_id' : valid telegram id, 'amount': FloatField, 'category': valid category}
+
+    method = 'POST'
+
+    in result new expense is added to profile
+
+In order to get all profile expenses:
+
+    url = 'host' + 'expense/' data = {'telegram_id' : valid telegram id}
+
+    method = 'GET'
+
+    in result all expense objects related to the current profile are returned

@@ -3,9 +3,14 @@ from django.http import HttpResponse, JsonResponse
 from django.views import View
 from django.views.generic.base import TemplateView
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 
 import requests
 import os
+
+from .models import BotUserSerializer, BotUserProfileSerializer, ExpenseSerializer, BotUser, BotUserProfile, Expense
 
 
 class TelegramBot():
@@ -72,8 +77,49 @@ class TelegramConnectionView(TemplateView):
             return(JsonResponse({'update': user_updates, 'username': user_first_name}))
         
         else:
-            
+
             return(render(request, self.template_name, context = {'user_id': self.tgBot.getUniqueIds()}))
+
+
+class BotUserApiView(APIView):
+    
+    def get(self, request, *args, **kwargs):
+        telegram_id = request.GET.get('telegram_id')
+        try:
+            bot_user = BotUser.objects.get(telegram_id = telegram_id)
+            serializer = BotUserSerializer(bot_user)
+            return(JsonResponse(serializer.data, safe = False))
+        except BotUser.DoesNotExist:
+            serializer = BotUserSerializer(data = request.GET)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class BotUserProfileApiView(APIView):
+
+    def get(self, request, *args, **kwargs):
+        telegram_id = request.GET.get('telegram_id')
+        bot_user = BotUser.objects.get(telegram_id = telegram_id)
+        expenses = BotUserProfile.objects.get(user = bot_user).expenses.all()
+        serializer = ExpenseSerializer(expenses, many = True)
+        return(JsonResponse(serializer.data, safe = False))
+
+    def post(self, request, *args, **kwargs):
+        telegram_id = request.POST.get('telegram_id')
+        amount = request.POST.get('amount')
+        category = request.POST.get('category')
+        bot_user = BotUser.objects.get(telegram_id = telegram_id)
+        profile = BotUserProfile.objects.get(user = bot_user)
+        serializer = ExpenseSerializer(data = request.data)
+        if serializer.is_valid():
+            expense = Expense(amount = amount, category = category)
+            expense.save()
+            profile.expenses.add(expense)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+
 
 
     
