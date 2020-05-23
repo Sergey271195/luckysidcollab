@@ -1,39 +1,39 @@
 {% extends '_base.html' %}
 
+{% load static %}
+
 {% block title %}Message{% endblock title %}
 
 {% block content %}
 
 <div class = 'container-fluid w-75 m-5'>
 {% csrf_token %}
-<form method = 'GET' class = 'm-5'>
-<select name='id_select'>
+
+
+<select name='id_select' id = 'user_id'>
     {% for id in user_id %}
-    <option>{{id}}</option>
+    <option value = '{{id}}'>{{id}}</option>
     {% endfor %}
 </select>
-    <input type = text name = 'message' />
-    <button type = 'submit' class = 'btn btn-success'>Send Message</button>
-</form>
+    <input type = text name = 'message' id = 'message_input'/>
+    <button type = 'button' class = 'btn btn-success' id = 'send_message_btn'>Send Message</button>  
+    <button type = 'button' class = 'btn btn-success' id ='update_btn'>Start Updating</button>
+    <button type = 'button' class = 'btn btn-success' id ='stop_update_btn'>Stop Updating</button>
+
+
 
 
 
 <div class = 'container'>
-<div class = 'h2 mb-3'><span >From</span>: {{username}}</div>
+<div class = 'h2 mb-3'><span >From</span>: <span id = 'username'></span></div>
 </div>
 
-{% for update in updates %}
-<div class = 'container mb-3'>
-    <div><span class = 'font-weight-bold'>Date</span>: {{update.message.date}}</div>
-    <div><span class = 'font-weight-bold'>Message</span>: {{update.message.text}}</div>
+<div id ='user_messages'>
 </div>
-
-{% endfor %}
-
 
 </div>
 {% endblock content %}
 
 {% block extrajs %}
-
+<script src = '{% static "js/sendMessage.js"%}'></script>
 {% endblock extrajs %}

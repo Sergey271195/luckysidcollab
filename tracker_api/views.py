@@ -8,11 +8,6 @@ import requests
 import os
 
 
-my_id = 540863534
-anton_id = 215096781
-
-user_ids = [my_id, anton_id]
-
 class TelegramBot():
 
     def __init__(self):
@@ -42,6 +37,15 @@ class TelegramBot():
         tracker_message= telegram_request.json()
         return tracker_message
 
+    def getUniqueIds(self):
+        
+        results = self.getUpdates()['result']
+        unique_ids = set()
+        for result in results:
+            unique_ids.add(result['message']['chat']['id'])
+
+        return unique_ids
+
 class MainApiView(View):
 
     def get(request, *args, **kwargs):
@@ -57,17 +61,24 @@ class TelegramConnectionView(TemplateView):
     def get(self, request, *args, **kwargs):
 
         updates = self.tgBot.getUpdates()
-        message = request.GET.get('message')
-        user_id = request.GET.get('id_select')
-        
-        user_updates = list(filter(lambda x: str(x['message']['chat']['id']) == user_id, updates['result']))
-        user_first_name = user_updates[0]['message']['chat']['first_name']
-        
-        print(user_updates)
 
-        if message and message != '':
-            message = self.tgBot.sendMessage(user_id, message)
-        return(render(request, self.template_name, context = {'updates': user_updates, 'username': user_first_name, 'user_id': user_ids}))
+        if request.is_ajax():
+            user_id = request.GET.get('user_id')
+            user_updates = sorted(list(filter(lambda x: str(x['message']['chat']['id']) == user_id, updates['result'])), key = lambda x : x['message']['date'], reverse = True)
+            user_first_name = user_updates[0]['message']['chat']['first_name']
+            message = request.GET.get('message')
+            if message and message != '':
+                message = self.tgBot.sendMessage(user_id, message)
+            return(JsonResponse({'update': user_updates, 'username': user_first_name}))
+        
+        else:
+
+            message = request.GET.get('message')
+            user_id = request.GET.get('id_select')
+
+            if message and message != '':
+                message = self.tgBot.sendMessage(user_id, message)
+            return(render(request, self.template_name, context = {'user_id': self.tgBot.getUniqueIds()}))
 
 
     
