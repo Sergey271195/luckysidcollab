@@ -3,6 +3,7 @@ from django.http import HttpResponse, JsonResponse
 from django.views import View
 from django.views.generic.base import TemplateView
 from django.views.decorators.csrf import csrf_exempt
+from django.db.models import Avg, Count, Min, Sum
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -11,116 +12,97 @@ import requests
 import os
 import json
 import re
+import datetime
+import matplotlib.pyplot as plt
 
 
-from .models import BotUserSerializer, BotUserProfileSerializer, ExpenseSerializer, BotUser, BotUserProfile, Expense
 
-
-
-class TelegramBot():
-
-    def __init__(self):
-
-        self.token = 'bot1037758299:AAHXpwE97wXDYzaU3Jqsd1SjNK_zqekQD5c'
-        self.url = f'https://api.telegram.org/{self.token}'
-
-    
-    def getMe(self):
-        
-        get_me_url = os.path.join(self.url, 'getMe')
-        telegram_response = requests.get(get_me_url)
-        tracker_bot = telegram_response.json()
-        return tracker_bot
-
-    def getUpdates(self, limit = 100):
-
-        get_updates_url = os.path.join(self.url, 'getUpdates')
-        telegram_response = requests.get(get_updates_url, params = {'limit': limit})
-        tracker_update = telegram_response.json()
-        return tracker_update
-
-    def sendMessage(self, user_id, text, parse_mode = ''):
-
-        send_message_url = os.path.join(self.url, 'sendMessage')
-        telegram_request = requests.post(send_message_url, data = {'chat_id': user_id, 'text': text, 'parse_mode': parse_mode})
-        tracker_message= telegram_request.json()
-        return tracker_message
-
-    def getUniqueIds(self):
-        
-        results = self.getUpdates()['result']
-        unique_ids = set()
-        for result in results:
-            unique_ids.add(result['message']['chat']['id'])
-
-        return unique_ids
+from .models import BotUser, BotUserProfile, Expense, TelegramBot
+from .customTg import createRowKeyboard
+from telegram_tracker.settings import BASE_DIR
+from .constants import CATEGORY_CHOICES, STARTING_CHOICES, CALLBACK_MESSAGES
 
 class MainApiView(APIView):
 
     tgBot = TelegramBot()
 
+    def returnCategoryKeyboard(self, user):
+        self.tgBot.sendMessage(user.telegram_id, 'Choose the category of your expense', reply_markup=createRowKeyboard(CATEGORY_CHOICES))
+
+    def returnStartingKeyboard(self, user):
+        self.tgBot.sendMessage(user.telegram_id, 'Choose your next action', reply_markup=createRowKeyboard(STARTING_CHOICES))
+
+    def callbackQueriesHandler(self, notification, user):
+
+        ###Delete unadded expense entries
+
+        if Expense.objects.filter(user = user, added = False).exists():
+            Expense.objects.filter(user = user, added = False).delete()
+        
+        request = notification['callback_query']
+        escort_message = request['message'].get('text')
+        reply_data = request.get('data')
+
+        if escort_message == CALLBACK_MESSAGES[0]:
+            if reply_data == STARTING_CHOICES[0][0]:
+                self.returnCategoryKeyboard(user)
+            else:
+                PlotCreator(user, reply_data)
+
+        elif escort_message == CALLBACK_MESSAGES[1]:
+            temporary_expense = Expense(user = user, category = reply_data)
+            temporary_expense.save()
+            self.tgBot.sendMessage(user.telegram_id, 'Specify the amount spent', reply_markup=json.dumps({'force_reply': True}))
+
+
     def checkUser(self, notification):
 
-        user_id = notification['message']['from'].get('id')
+        if 'callback_query' in notification:
+            request = notification['callback_query']
+            user_id = request['message']['chat'].get('id')
+            user_first_name = request['message']['chat'].get('first_name')
+
+        else:
+            user_id = notification['message']['from'].get('id')
+            user_first_name = notification['message']['from'].get('first_name')
 
         if (not BotUser.objects.filter(telegram_id = int(user_id)).exists()):
-            new_user = BotUser(telegram_id = int(user_id))
+            new_user = BotUser(telegram_id = int(user_id), first_name = user_first_name)
             new_user.save()
             print('New user has been created')
             self.tgBot.sendMessage(user_id, "Greetings and welcome. You've been added to our small db. Wish you a nice stay. If you have any complaints, contact LuckySid! ;)")
-
+        
         user = BotUser.objects.get(telegram_id = int(user_id))
         return user
+        
 
     def messageHandler(self, notification, user):
+        
+        if 'callback_query' in notification:
+            self.callbackQueriesHandler(notification, user)
 
-        message = notification['message'].get('text')
-
-        if message == 'data':
-            print('Data request')
-            expenses = BotUserProfile.objects.get(user = user).expenses.all()
-            for expense in expenses:
-                response = ''
-                response += f'Date: {expense.date} \n'
-                response += f'Amount: {expense.amount} \n'
-                response += f'Category: {expense.get_category_display()} \n'
-                self.tgBot.sendMessage(user.telegram_id, response, 'HTML')
-
-        elif message.find('send') != -1:
-
-            amount = re.search(r'amount:(\s)?(?P<amount>(\d+)(.(\d+))?)', message)
-            category = re.search(r'category:(\s)?(?P<category>(\w{2}\b))', message)           
-
-            if amount and category:
-                post_dict = {'amount': amount.group('amount'), 'category': category.group('category').upper()}
-                serializer = ExpenseSerializer(data = post_dict)
-                if serializer.is_valid():
-                    expense = Expense(amount = post_dict.get('amount'), category = post_dict.get('category'))
-                    expense.save()
-                    BotUserProfile.objects.get(user = user).expenses.add(expense)
-                    self.tgBot.sendMessage(user.telegram_id, "Your data has been added to db!")
+        elif notification['message'].get('reply_to_message') and notification['message']['reply_to_message'].get('text') == 'Specify the amount spent':
+            try:
+                amount = float(notification['message'].get('text'))
+                if Expense.objects.filter(user = user, added = False).exists():
+                    latest_expense = Expense.objects.get(user = user, added = False)
+                    latest_expense.amount = amount
+                    latest_expense.added = True
+                    latest_expense.save()
+                    BotUserProfile.objects.get(user = user).expenses.add(latest_expense)
+                    self.tgBot.sendMessage(user.telegram_id, "Your data has been added to the database!")
+                    self.tgBot.sendMessage(user.telegram_id, 'Choose your next action', reply_markup=createRowKeyboard(STARTING_CHOICES))
                 else:
-                    print(serializer.errors)
-                    self.tgBot.sendMessage(user.telegram_id, "You've been providing wrong data!")
-
-            else:
+                    print('No unadded expenses')
+            except Exception as e:
+                print(e)
                 self.tgBot.sendMessage(user.telegram_id, "You've been providing wrong data!")
+                self.tgBot.sendMessage(user.telegram_id, 'Choose your next action', reply_markup=createRowKeyboard(STARTING_CHOICES))
 
-        elif message == 'help':
-
-            categories = 'Available categories: \n FD (FOOD) \n SV (SERVICES) \n AP (APPLIANCES) \n PT (PETROL) \n RT (RESTAURANTS)\n'
-            methods = "Available methods: \n data - get list of your expenses \n send amount: (money you've spent) category: (one of the available categories) - to add data to database \n"
-            check = "check users - just for informational purposes"
-            self.tgBot.sendMessage(user.telegram_id, categories+methods+check, 'HTML')
-
-        elif message == 'check users':
-            users = BotUser.objects.all()
-            response = ''
-            for u in users:
-                response += f'{u.telegram_id} \n'
-
-            self.tgBot.sendMessage(user.telegram_id, response, 'HTML')
-
+        else:
+            if Expense.objects.filter(user = user, added = False).exists():
+                Expense.objects.filter(user = user, added = False).delete()
+            self.tgBot.sendMessage(user.telegram_id, 'Choose your next action', reply_markup=createRowKeyboard(STARTING_CHOICES))
 
 
     def get(self, request, *args, **kwargs):
@@ -135,75 +117,88 @@ class MainApiView(APIView):
 
         self.messageHandler(notification, user)
         
-        print(user)
-        print(notification)
+        print(user.first_name)
+        print(json.dumps(notification, indent=4))
 
         return(JsonResponse({'status_code': 200}))
 
 
-class TelegramConnectionView(TemplateView):
 
-    template_name = 'sendMessage.html'
-    tgBot = TelegramBot()
+class PlotCreator():
 
-    @csrf_exempt
-    def get(self, request, *args, **kwargs):
+    def __init__(self, user, plot_type):
+        self.user = user
+        self.type = plot_type
+        self.data = BotUserProfile.objects.get(user = user).expenses.all()
+        self.labels = []
+        self.plot_data = []
+        self.file_location = f'static/images/{self.type}_{self.user.telegram_id}.png'
+        self.tgBot = TelegramBot()
+        if self.type == STARTING_CHOICES[1][0]:
+            self.createWeekTable()
+            self.message = 'Weekly table...'
+        elif self.type == STARTING_CHOICES[2][0]:
+            self.createBarPlot()
+            self.message = 'Bar plot...'
+        elif self.type == STARTING_CHOICES[3][0]:
+            self.createPiePlot()
+            self.message = 'Pie plot...'
+        self.tgBot.sendPhoto(user.telegram_id, self.file_location, self.message)
 
-        updates = self.tgBot.getUpdates()
+    def createBarPlot(self):
+        for category in CATEGORY_CHOICES:
+            if self.data.filter(category = category[0]).exists():
+                self.labels.append(category[1])
+                self.plot_data.append(self.data.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
 
-        if request.is_ajax():
-            user_id = request.GET.get('user_id')
-            user_updates = sorted(list(filter(lambda x: str(x['message']['chat']['id']) == user_id, updates['result'])), key = lambda x : x['message']['date'], reverse = True)
-            user_first_name = user_updates[0]['message']['chat']['first_name']
-            message = request.GET.get('message')
-            if message and message != '':
-                message = self.tgBot.sendMessage(user_id, message)
-            return(JsonResponse({'update': user_updates, 'username': user_first_name}))
-        
-        else:
-
-            return(render(request, self.template_name, context = {'user_id': self.tgBot.getUniqueIds()}))
-
-
-class BotUserApiView(APIView):
-    
-    def get(self, request, *args, **kwargs):
-        telegram_id = request.GET.get('telegram_id')
-        try:
-            bot_user = BotUser.objects.get(telegram_id = telegram_id)
-            serializer = BotUserSerializer(bot_user)
-            return(JsonResponse(serializer.data, safe = False))
-        except BotUser.DoesNotExist:
-            serializer = BotUserSerializer(data = request.GET)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-class BotUserProfileApiView(APIView):
-
-    def get(self, request, *args, **kwargs):
-        telegram_id = request.GET.get('telegram_id')
-        bot_user = BotUser.objects.get(telegram_id = telegram_id)
-        expenses = BotUserProfile.objects.get(user = bot_user).expenses.all()
-        serializer = ExpenseSerializer(expenses, many = True)
-        return(JsonResponse(serializer.data, safe = False))
-
-    def post(self, request, *args, **kwargs):
-        telegram_id = request.POST.get('telegram_id')
-        amount = request.POST.get('amount')
-        category = request.POST.get('category')
-        bot_user = BotUser.objects.get(telegram_id = telegram_id)
-        profile = BotUserProfile.objects.get(user = bot_user)
-        serializer = ExpenseSerializer(data = request.data)
-        if serializer.is_valid():
-            expense = Expense(amount = amount, category = category)
-            expense.save()
-            profile.expenses.add(expense)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        plt.bar(self.labels, self.plot_data)
+        plt.savefig(os.path.join(BASE_DIR, f'static/images/bar_{self.user.telegram_id}.png'))
         
 
-
-
     
+    def createPiePlot(self):
+
+        for category in CATEGORY_CHOICES:
+            if self.data.filter(category = category[0]).exists():
+                self.labels.append(category[1])
+                self.plot_data.append(self.data.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
+
+        
+        fig, axs = plt.subplots(1, 2)
+        pie = axs[0].pie(self.plot_data, autopct='%.1f%%', pctdistance = 1.4)
+        axs[1].axis('off')
+        axs[1].legend(pie[0], self.labels,
+            title="Категории",
+            loc="center")
+        plt.savefig(os.path.join(BASE_DIR, f'static/images/pie_{self.user.telegram_id}.png'))
+        return('Pie plot...')
+
+    def createWeekTable(self):
+
+        self.labels = ['Дата'] + [category[1] for category in CATEGORY_CHOICES] + ['Итог']
+
+        for i in range(0, 6):
+            day = datetime.datetime.today().date() + datetime.timedelta(days = -i)
+            day_query = self.data.filter(date = day)
+            day_data = [day]
+            total_for_day = day_query.aggregate(total_amount = Sum('amount')).get('total_amount')
+            for category in CATEGORY_CHOICES:
+                if day_query.filter(category = category[0]).exists():
+                    day_data.append(day_query.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
+                else:
+                    day_data.append(0)
+            day_data.append(total_for_day)
+            self.plot_data.append(day_data)
+
+        plt.figure()
+        ax = plt.gca()
+        ax.axis('off')
+        table = plt.table(	
+            cellText = self.plot_data, colLabels = self.labels, cellLoc= 'center', loc = 'center'
+        )
+        table.scale(1, 3)
+        plt.savefig(os.path.join(BASE_DIR, f'static/images/table_{self.user.telegram_id}.png'))
+        return('Weekly table...')
+
+
+  
