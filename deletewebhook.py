@@ -28,4 +28,4 @@ class Webhook():
 
 
 if __name__ == '__main__':
-    Webhook().setWebhook('https://telegram-backend-api.herokuapp.com/')
+    Webhook().deleteWebhook()
