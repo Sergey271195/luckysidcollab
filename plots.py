@@ -57,7 +57,23 @@ def createTable():
     #plt.show()
     plt.savefig('/home/sergey/Desktop/telegram/total.png')
 
+def global_decorator(message, callback):
+    def decorator(function):
+        def wrapper(notification):
+            if notification == 'message':
+                print(notification + 'is right message')
+                function(notification)
+            else:
+                print(notification +'is not it')
+                function(notification)
+        return wrapper
+    return decorator
+
+@global_decorator(message = 'hi', callback = '')
+def sayHello(notification):
+    print(f'inside message -  {notification}')
+
 if __name__ == '__main__':
-    print(datetime.datetime.today().date())
-    print(datetime.timedelta(days = -7))
-    print(datetime.datetime.today().date() + datetime.timedelta(days = -7))
+    print(datetime.datetime.now().hour)
+    print(datetime.timedelta(hours = -6))
+    print(datetime.datetime.now().time()+datetime.timedelta(hours = -6))

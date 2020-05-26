@@ -140,4 +140,5 @@ cython_debug/
 #My adds
 api_rules.txt
 backupinfo.txt
-setwebhook.py
+plots.py
+templates/

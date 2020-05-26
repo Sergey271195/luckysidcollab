@@ -1,18 +1,11 @@
 import os
 import django_heroku
 
-# Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/3.0/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'e5z0+%-d8$0l_=pzx*xyo4y9yl=clpk+3$-ul^h!$i^u6^mumq'
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = (os.environ.get('DEBUG') == 'True')
 
 ALLOWED_HOSTS = ['heroku.com',]
 
@@ -66,9 +59,6 @@ TEMPLATES = [
 WSGI_APPLICATION = 'telegram_tracker.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/3.0/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -76,9 +66,6 @@ DATABASES = {
     }
 }
 
-
-# Password validation
-# https://docs.djangoproject.com/en/3.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
     {

@@ -1,26 +1,5 @@
 import json
 
-""" FOOD ='FD'
-SERVICES = 'SV'
-APPLIANCES = 'AP'
-PETROL = 'PT'
-RESTAURANTS = 'RT'
-
-CATEGORY_CHOICES = [
-        (FOOD, 'Продукты'),
-        (SERVICES, "Услуги"), 
-        (APPLIANCES, 'Техника'),
-        (PETROL, 'АЗС'),
-        (RESTAURANTS,  'Рестораны'),
-    ]
-
-STARTING_CHOICES = [
-    ('keyboard', 'Добавить запись'),
-    ('data', 'Получить записи '),
-    ('plot', 'График'),   
-] """
-
-
 class InlineKeyobardButton():
 
     def __init__(self, text, callback_data):
@@ -56,29 +35,6 @@ def createRowKeyboard(keyboard_layout):
         keyboard.addRow([button])
         
     return keyboard.getKeyboard()
-
-
-
-""" def createCategoryKeyboard():
-
-    keyboard = InlineKeyobardMarkup()
-
-    for category in CATEGORY_CHOICES:
-        button = InlineKeyobardButton(text = category[1], callback_data= category[0]).getButton()
-        keyboard.addRow([button])
-        
-    return keyboard.getKeyboard()
-
-
-def createStartingKeyboard():   
-
-    keyboard = InlineKeyobardMarkup()
-
-    for category in STARTING_CHOICES:
-        button = InlineKeyobardButton(text = category[1], callback_data= category[0]).getButton()
-        keyboard.addRow([button])
-        
-    return keyboard.getKeyboard() """
 
 if __name__ == '__main__':
     createCategoryKeyboard()

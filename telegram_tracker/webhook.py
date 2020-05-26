@@ -1,21 +1,24 @@
 import requests
 import os
 
-###'https://372cf369.ngrok.io/'
-
-###'https://telegram-backend-api.herokuapp.com/'
-
 class Webhook():
 
     def __init__(self):
-        self.token = 'bot1037758299:AAHXpwE97wXDYzaU3Jqsd1SjNK_zqekQD5c'
+        self.token = os.environ.get('LAVANDA_TOKEN')
         self.url = f'https://api.telegram.org/{self.token}'
 
 
-    def setWebhook(self, url):
+    def setWebhook(self):
 
+        if os.environ.get('PRODUCTION') == 'True':
+            url_path = 'https://telegram-backend-api.herokuapp.com/'
+        else:
+            url_path = 'https://372cf369.ngrok.io/'
+
+        
+        print(f'Connecting to: {url_path}')
         set_url = os.path.join(self.url, 'setWebhook')
-        webhook = requests.post(set_url, data = {'url': url})
+        webhook = requests.post(set_url, data = {'url': url_path})
         r = webhook.json()
         print(r)
 

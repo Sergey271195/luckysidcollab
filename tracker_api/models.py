@@ -13,7 +13,7 @@ class TelegramBot():
 
     def __init__(self):
 
-        self.token = 'bot1037758299:AAHXpwE97wXDYzaU3Jqsd1SjNK_zqekQD5c'
+        self.token = os.environ.get('LAVANDA_TOKEN')
         self.url = f'https://api.telegram.org/{self.token}'
 
     
@@ -34,13 +34,6 @@ class TelegramBot():
             return tracker_message
         except Exception as e:
             print(e)
-
-    """ def getUpdates(self, limit = 100):
-
-        get_updates_url = os.path.join(self.url, 'getUpdates')
-        telegram_response = requests.get(get_updates_url, params = {'limit': limit})
-        tracker_update = telegram_response.json()
-        return tracker_update """
 
     def sendMessage(self, user_id, text, parse_mode = '', reply_markup = ''):
 
