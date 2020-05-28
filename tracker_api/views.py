@@ -20,7 +20,8 @@ import matplotlib.pyplot as plt
 from .models import BotUser, BotUserProfile, Expense, TelegramBot
 from .customTg import createRowKeyboard
 from telegram_tracker.settings import BASE_DIR
-from .constants import CATEGORY_CHOICES, STARTING_CHOICES, CALLBACK_MESSAGES
+from .constants import CATEGORY_CHOICES, STARTING_CHOICES, CALLBACK_MESSAGES, VOICE_COMMANDS
+from .speech import TelegramSpeechRecognizer
 
 def admin_decorator(message):
     def decorator(method):
@@ -34,7 +35,7 @@ def admin_decorator(message):
 
 def bot_message_decorator(message):
     def decorator(method_to_execute):
-        def wrapper(self, notification, user):
+        def wrapper(self, notification, user, *args, **kwargs):
             if 'message' in notification:
                 if 'entities' in notification['message']:
                     if notification['message']['entities'][0].get('type') == 'bot_command':
@@ -50,6 +51,9 @@ class MainApiView(APIView):
 
     @bot_message_decorator('/add')
     def returnCategoryKeyboard(self, notification, user):
+        self.tgBot.sendMessage(user.telegram_id, 'Choose the category of your expense', reply_markup=createRowKeyboard(CATEGORY_CHOICES))
+    
+    def simpleReturnCategoryKeyboard(self, notification, user):
         self.tgBot.sendMessage(user.telegram_id, 'Choose the category of your expense', reply_markup=createRowKeyboard(CATEGORY_CHOICES))
 
     @bot_message_decorator('/help')
@@ -120,14 +124,13 @@ class MainApiView(APIView):
 
         if Expense.objects.filter(user = user, added = False).exists():
             Expense.objects.filter(user = user, added = False).delete()
-        
+
         request = notification['callback_query']
         escort_message = request['message'].get('text')
         reply_data = request.get('data')
-
         if escort_message == CALLBACK_MESSAGES[0]:
             if reply_data == STARTING_CHOICES[0][0]:
-                self.returnCategoryKeyboard(user, notification)
+                self.simpleReturnCategoryKeyboard(notification, user)
             else:
                 PlotCreator(user, reply_data)
 
@@ -135,6 +138,9 @@ class MainApiView(APIView):
             temporary_expense = Expense(user = user, category = reply_data)
             temporary_expense.save()
             self.tgBot.sendMessage(user.telegram_id, 'Specify the amount spent', reply_markup=json.dumps({'force_reply': True}))
+
+        elif escort_message == CALLBACK_MESSAGES[2]:
+            PlotCreator(user, reply_data)
 
     def checkUser(self, notification):
 
@@ -162,24 +168,46 @@ class MainApiView(APIView):
         if 'callback_query' in notification:
             self.callbackQueriesHandler(notification, user)
 
-        elif notification['message'].get('reply_to_message') and notification['message']['reply_to_message'].get('text') == 'Specify the amount spent':
-            try:
-                amount = float(notification['message'].get('text'))
-                if Expense.objects.filter(user = user, added = False).exists():
-                    latest_expense = Expense.objects.get(user = user, added = False)
-                    latest_expense.amount = amount
-                    latest_expense.added = True
-                    latest_expense.save()
-                    BotUserProfile.objects.get(user = user).expenses.add(latest_expense)
-                    self.tgBot.sendMessage(user.telegram_id, "Your data has been added to the database!")
+        mess = notification.get('message')
+        if mess:
+            voice = mess.get('voice')
+            if voice:
+                file_id = voice.get('file_id')
+
+                tsr = TelegramSpeechRecognizer(file_id, os.environ.get('LAVANDA_TOKEN'))
+                response = tsr.convert_data()
+                if any([voice_command in response.lower() for voice_command in VOICE_COMMANDS]):
+                    if VOICE_COMMANDS[0] in response.lower():
+                        self.tgBot.sendMessage(user.telegram_id, f"Привет, {user.first_name}")
+                    if VOICE_COMMANDS[1] in response.lower():
+                        self.tgBot.sendMessage(user.telegram_id, f"Сейчас {datetime.datetime.now().strftime('%H:%M:%S')}")
+                    if VOICE_COMMANDS[2] in response.lower():
+                        self.tgBot.sendMessage(user.telegram_id, f"Мои создатели еще не придумали мне имя")
+                    if VOICE_COMMANDS[3] in response.lower():
+                        self.tgBot.sendMessage(user.telegram_id, f"Пока, {user.first_name}")
                 else:
-                    print('No unadded expenses')
-            except Exception as e:
-                print(e)
-                self.tgBot.sendMessage(user.telegram_id, "You've been providing wrong data!")
-        else:
-            if Expense.objects.filter(user = user, added = False).exists():
-                Expense.objects.filter(user = user, added = False).delete()
+                    self.tgBot.sendMessage(user.telegram_id, f"Google Speech Recognition считает, что ты сказал: {response}")
+
+
+
+            elif notification['message'].get('reply_to_message') and notification['message']['reply_to_message'].get('text') == 'Specify the amount spent':
+                try:
+                    amount = float(notification['message'].get('text'))
+                    if Expense.objects.filter(user = user, added = False).exists():
+                        latest_expense = Expense.objects.get(user = user, added = False)
+                        latest_expense.amount = amount
+                        latest_expense.added = True
+                        latest_expense.save()
+                        BotUserProfile.objects.get(user = user).expenses.add(latest_expense)
+                        self.tgBot.sendMessage(user.telegram_id, "Your data has been added to the database!")
+                    else:
+                        print('No unadded expenses')
+                except Exception as e:
+                    print(e)
+                    self.tgBot.sendMessage(user.telegram_id, "You've been providing wrong data!")
+            else:
+                if Expense.objects.filter(user = user, added = False).exists():
+                    Expense.objects.filter(user = user, added = False).delete()
 
 
     def get(self, request, *args, **kwargs):
@@ -192,15 +220,18 @@ class MainApiView(APIView):
         
         user = self.checkUser(notification)
 
+        
+
+        self.returnCategoryKeyboard(notification = notification, user = user)
+        self.returnStartingKeyboard(notification = notification, user = user)
+        self.returnPlotKeyboard(notification = notification, user = user)
+
         self.messageHandler(notification, user)
-        self.returnCategoryKeyboard(notification, user)
-        self.returnStartingKeyboard(notification, user)
-        self.returnPlotKeyboard(notification, user)
 
         ### For admin
 
-        self.returnSubscribersList(notification, user)
-        self.sendGroupMessage(notification, user)
+        self.returnSubscribersList(notification = notification, user = user)
+        self.sendGroupMessage(notification = notification, user = user)
         
         print(user.first_name)
         print(json.dumps(notification, indent=4))

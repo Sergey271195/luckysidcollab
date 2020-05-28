@@ -18,5 +18,13 @@ STARTING_CHOICES = [
 CALLBACK_MESSAGES = [
     'Choose your next action',
     'Choose the category of your expense',
+    'Choose visualization style',
 
+]
+
+VOICE_COMMANDS = [
+    'привет',
+    'время',
+    'как тебя зовут',
+    'пока'
 ]

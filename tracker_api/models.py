@@ -25,6 +25,7 @@ class TelegramBot():
         return tracker_bot
 
     def sendPhoto(self, user_id, file_location, caption = ''):
+
         try:
             send_message_url = os.path.join(self.url, 'sendPhoto')
             files = {'photo':(open(file_location, 'rb'))}
@@ -42,6 +43,15 @@ class TelegramBot():
         tracker_message= telegram_request.json()
         print(tracker_message)
         return tracker_message
+
+    def getFile(self, file_id):
+        
+        get_file_url = os.path.join(self.url, 'getFile')
+        telegram_response = requests.post(get_file_url, data = {'file_id': file_id})
+        file_instance = telegram_response.json()
+        print(file_instance)
+        return file_instance
+
 
 class BotUser(models.Model):
     telegram_id = models.IntegerField(unique=True)

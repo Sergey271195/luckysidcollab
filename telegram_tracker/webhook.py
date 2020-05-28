@@ -2,19 +2,18 @@ import requests
 import os
 
 class Webhook():
-
+    
     def __init__(self):
         self.token = os.environ.get('LAVANDA_TOKEN')
         self.url = f'https://api.telegram.org/{self.token}'
 
 
     def setWebhook(self):
-
+        
         if os.environ.get('PRODUCTION') == 'True':
             url_path = 'https://telegram-backend-api.herokuapp.com/'
         else:
-            url_path = 'https://372cf369.ngrok.io/'
-
+            url_path = 'https://deba64f3e462.ngrok.io'
         
         print(f'Connecting to: {url_path}')
         set_url = os.path.join(self.url, 'setWebhook')
