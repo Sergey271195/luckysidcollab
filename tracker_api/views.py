@@ -176,18 +176,20 @@ class MainApiView(APIView):
 
                 tsr = TelegramSpeechRecognizer(file_id, os.environ.get('LAVANDA_TOKEN'))
                 response = tsr.convert_data()
-                if any([voice_command in response.lower() for voice_command in VOICE_COMMANDS]):
-                    if VOICE_COMMANDS[0] in response.lower():
-                        self.tgBot.sendMessage(user.telegram_id, f"Привет, {user.first_name}")
-                    if VOICE_COMMANDS[1] in response.lower():
-                        self.tgBot.sendMessage(user.telegram_id, f"Сейчас {datetime.datetime.now().strftime('%H:%M:%S')}")
-                    if VOICE_COMMANDS[2] in response.lower():
-                        self.tgBot.sendMessage(user.telegram_id, f"Мои создатели еще не придумали мне имя")
-                    if VOICE_COMMANDS[3] in response.lower():
-                        self.tgBot.sendMessage(user.telegram_id, f"Пока, {user.first_name}")
+                if response:
+                    if any([voice_command in response.lower() for voice_command in VOICE_COMMANDS]):
+                        if VOICE_COMMANDS[0] in response.lower():
+                            self.tgBot.sendMessage(user.telegram_id, f"Привет, {user.first_name}")
+                        if VOICE_COMMANDS[1] in response.lower():
+                            self.tgBot.sendMessage(user.telegram_id, f"Сейчас {datetime.datetime.now().strftime('%H:%M:%S')}")
+                        if VOICE_COMMANDS[2] in response.lower():
+                            self.tgBot.sendMessage(user.telegram_id, f"Мои создатели еще не придумали мне имя")
+                        if VOICE_COMMANDS[3] in response.lower():
+                            self.tgBot.sendMessage(user.telegram_id, f"Пока, {user.first_name}")
+                    else:
+                        self.tgBot.sendMessage(user.telegram_id, f"Google Speech Recognition считает, что ты сказал: {response}")
                 else:
-                    self.tgBot.sendMessage(user.telegram_id, f"Google Speech Recognition считает, что ты сказал: {response}")
-
+                    self.tgBot.sendMessage(user.telegram_id, f"Google Speech Recognition could not understand audio")
 
 
             elif notification['message'].get('reply_to_message') and notification['message']['reply_to_message'].get('text') == 'Specify the amount spent':

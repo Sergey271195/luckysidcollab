@@ -32,7 +32,7 @@ class TelegramSpeechRecognizer():
             return(transcribed_data)
         except sr.UnknownValueError:
             print("Google Speech Recognition could not understand audio")
-            return("Google Speech Recognition could not understand audio")
+            return(None)
         except sr.RequestError as e:
             print("Could not request results from Google Speech Recognition service; {0}".format(e))
-            return('Could not request results from Google Speech Recognition service')
+            return(None)
