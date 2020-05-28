@@ -4,6 +4,7 @@ CATEGORY_CHOICES = [
     ('AP', 'Техника'),
     ('PT', 'АЗС'),
     ('RT',  'Рестораны'),
+    ### Work in progress
 ]
 
 STARTING_CHOICES = [
@@ -11,7 +12,7 @@ STARTING_CHOICES = [
     ('table', 'Сводная таблица за неделю'),
     ('bar', 'Столбчатая диаграмма'),
     ('pie', 'Круговая диаграмма'), 
-        
+    ### Work in progress
 ]
 
 
@@ -19,12 +20,13 @@ CALLBACK_MESSAGES = [
     'Choose your next action',
     'Choose the category of your expense',
     'Choose visualization style',
-
+    ### Work in progress
 ]
 
 VOICE_COMMANDS = [
     'привет',
     'время',
     'как тебя зовут',
-    'пока'
+    'пока',
+    ### Work in progress
 ]
