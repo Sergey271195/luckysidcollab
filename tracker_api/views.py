@@ -15,23 +15,11 @@ import re
 import datetime
 import matplotlib.pyplot as plt
 
-
-
-from .models import BotUser, BotUserProfile, Expense, TelegramBot
-from .customTg import createRowKeyboard
+from .models import BotUser, BotUserProfile, Expense
+from .customTg import createRowKeyboard, TelegramBot
 from telegram_tracker.settings import BASE_DIR
-from .constants import CATEGORY_CHOICES, STARTING_CHOICES, CALLBACK_MESSAGES, VOICE_COMMANDS
-from .speech import TelegramSpeechRecognizer
+from .constants import CATEGORY_CHOICES, STARTING_CHOICES, CALLBACK_MESSAGES, GREETING_OPTIONS, HELP_MESSAGE, TIMEPERIOD_CHOICES
 
-def admin_decorator(message):
-    def decorator(method):
-        def wrapper(self, notification, user, *args, **kwargs):
-            if user.telegram_id == int(os.environ.get('ADMIN_TELEGRAM_ID')):
-                if 'message' in notification:
-                    if notification['message'].get('text') == message:
-                        return method(self, notification, user)
-        return wrapper
-    return decorator
 
 def bot_message_decorator(message):
     def decorator(method_to_execute):
@@ -44,6 +32,28 @@ def bot_message_decorator(message):
         return wrapper
     return decorator
 
+def callback_query_decorator(callback_message, callback_data):
+    def decorator(method_to_execute):
+        def wrapper(self, notification, user, *args, **kwargs):
+            if 'callback_query' in notification:
+                if 'message' in notification['callback_query']:
+                    if notification['callback_query']['message'].get('text') == callback_message:
+                        if notification['callback_query'].get('data') == callback_data:
+                            return method_to_execute(self, notification, user)
+        return wrapper
+    return decorator
+
+
+def reply_message_decorator(reply_message):
+    def decorator(method_to_execute):
+        def wrapper(self, notification, user):
+            if notification.get('message'):
+                if notification['message'].get('reply_to_message'):
+                    if notification['message']['reply_to_message'].get('text') == reply_message:
+                        return method_to_execute(self, notification, user)
+        return wrapper
+    return decorator
+
 
 class MainApiView(APIView):
 
@@ -51,96 +61,79 @@ class MainApiView(APIView):
 
     @bot_message_decorator('/add')
     def returnCategoryKeyboard(self, notification, user):
-        self.tgBot.sendMessage(user.telegram_id, 'Choose the category of your expense', reply_markup=createRowKeyboard(CATEGORY_CHOICES))
-    
-    def simpleReturnCategoryKeyboard(self, notification, user):
-        self.tgBot.sendMessage(user.telegram_id, 'Choose the category of your expense', reply_markup=createRowKeyboard(CATEGORY_CHOICES))
+        self.tgBot.sendMessage(user.telegram_id, 'Выберите категорию затрат', reply_markup=createRowKeyboard(CATEGORY_CHOICES))
+
+    @bot_message_decorator('/start')
+    def returnGreetingMessage(self, notification, user):
+        self.tgBot.sendMessage(user.telegram_id, GREETING_OPTIONS[0])
 
     @bot_message_decorator('/help')
     def returnStartingKeyboard(self, notification, user):
-        self.tgBot.sendMessage(user.telegram_id, 'Choose your next action', reply_markup=createRowKeyboard(STARTING_CHOICES))
+        self.tgBot.sendMessage(user.telegram_id, HELP_MESSAGE[0])
 
     @bot_message_decorator('/datavisualisation')
     def returnPlotKeyboard(self, notification, user):
-        self.tgBot.sendMessage(user.telegram_id, 'Choose visualization style', reply_markup=createRowKeyboard(STARTING_CHOICES[1:]))
+        self.tgBot.sendMessage(user.telegram_id, 'Формат предоставления данных', reply_markup=createRowKeyboard(STARTING_CHOICES[1:3]))
 
     @bot_message_decorator('/stat')
     def returnWeekStatistics(self, notification, user):
-        self.tgBot.sendMessage(user.telegram_id, 'Choose visualization style')
+        PlotCreator(user = user).createWeeklyStatisticsMessage()
 
-    @admin_decorator('/users')
-    def returnSubscribersList(self, notification, user):
-        reply = 'List of current users \n'
-        bot_users = BotUser.objects.all()
-        for user in bot_users:
-            reply += f'{user.first_name} id {user.telegram_id} \n'
-        self.tgBot.sendMessage(os.environ.get('ADMIN_TELEGRAM_ID'), reply)
-
-    @admin_decorator('/group_message')
-    def sendGroupMessage(self, notification, user):
-        current_hour = datetime.datetime.now().hour
-        current_time = datetime.datetime.now().time()
-        if current_hour < 5 or current_hour > 22:
-            greeting_message = 'Good night'
-        elif current_hour > 5 and current_hour < 10:
-            greeting_message = 'Good morning'
-        elif current_hour > 10 and current_hour < 16:
-            greeting_message = 'Good day'
-        elif current_hour > 16 and current_hour < 22:
-            greeting_message = 'Good evening'
-        bot_users = BotUser.objects.all()
-        for user in bot_users:
-            try:
-                profile_today = BotUserProfile.objects.get(user=user).expenses.all().filter(date = datetime.datetime.today().date() + datetime.timedelta(days = -0))
-                today_amount = profile_today.aggregate(total_amount = Sum('amount')).get('total_amount')
-            except Exception as e:
-                today_amount = 0
-            try:
-                profile_yesterday = BotUserProfile.objects.get(user=user).expenses.all().filter(date = datetime.datetime.today().date() + datetime.timedelta(days = -1))
-                yesterday_amount = profile_yesterday.aggregate(total_amount = Sum('amount')).get('total_amount')
-            except Exception as e:
-                yesterday_amount = 0
-            if today_amount is None:
-                today_amount = 0
-            if yesterday_amount is None:
-                yesterday_amount = 0
-            delta = yesterday_amount - today_amount
-            if delta > 0:
-                pre_message = f'less by {abs(delta)} \n'
-            elif delta < 0:
-                pre_message = f'more by {abs(delta)} \n'
-            elif delta == 0:
-                pre_message = f'exectly the same as yesterday! \n'
-            group_message = f"Hello {user.first_name}! This message is halfautomatic! \nIt's used for testing group messages \nCurrent time is : {current_time}\n"
-            greet = f"That's why we are saying: {greeting_message}!\n"
-            summary = f"Today you've spend {today_amount}. Which is "
-            yest = f'That is by the way {yesterday_amount}'
-            self.tgBot.sendMessage(user.telegram_id, group_message+greet+summary+pre_message+yest)
+    @reply_message_decorator(reply_message = 'Сумма затрат')
+    def pushDataToPostgres(self, notification, user):
+        try:
+            amount = float(notification['message'].get('text'))
+            if amount > 0:
+                if Expense.objects.filter(user = user, added = False).exists():
+                    latest_expense = Expense.objects.get(user = user, added = False)
+                    latest_expense.amount = amount
+                    latest_expense.added = True
+                    latest_expense.save()
+                    BotUserProfile.objects.get(user = user).expenses.add(latest_expense)
+                    self.tgBot.sendMessage(user.telegram_id, "Запись успешно добавлена в базу данных!")
+                else:
+                    print('No unadded expenses')
+            else:
+                self.tgBot.sendMessage(user.telegram_id, "Вами предоставлены некорректные данные.\nСумма должна быть неотрицательным числом")
+        except Exception as e:
+            print(e)
+            self.tgBot.sendMessage(user.telegram_id, "Вами предоставлены некорректные данные.\nСумма должна быть неотрицательным числом")
+            if Expense.objects.filter(user = user, added = False).exists():
+                Expense.objects.filter(user = user, added = False).delete()
+   
     
 
     def callbackQueriesHandler(self, notification, user):
 
-        ###Delete unadded expense entries
+        if 'callback_query' in notification:
 
-        if Expense.objects.filter(user = user, added = False).exists():
-            Expense.objects.filter(user = user, added = False).delete()
+            ###Delete unadded expense entries
 
-        request = notification['callback_query']
-        escort_message = request['message'].get('text')
-        reply_data = request.get('data')
-        if escort_message == CALLBACK_MESSAGES[0]:
-            if reply_data == STARTING_CHOICES[0][0]:
-                self.simpleReturnCategoryKeyboard(notification, user)
-            else:
-                PlotCreator(user, reply_data)
+            if Expense.objects.filter(user = user, added = False).exists():
+                Expense.objects.filter(user = user, added = False).delete()
 
-        elif escort_message == CALLBACK_MESSAGES[1]:
-            temporary_expense = Expense(user = user, category = reply_data)
-            temporary_expense.save()
-            self.tgBot.sendMessage(user.telegram_id, 'Specify the amount spent', reply_markup=json.dumps({'force_reply': True}))
+            request = notification['callback_query']
+            escort_message = request['message'].get('text')
+            reply_data = request.get('data')
+            
 
-        elif escort_message == CALLBACK_MESSAGES[2]:
-            PlotCreator(user, reply_data)
+            if escort_message == CALLBACK_MESSAGES[0]:
+                temporary_expense = Expense(user = user, category = reply_data)
+                temporary_expense.save()
+                self.tgBot.sendMessage(user.telegram_id, 'Сумма затрат', reply_markup=json.dumps({'force_reply': True}))
+            
+            
+            elif escort_message == CALLBACK_MESSAGES[1]:
+                if reply_data == STARTING_CHOICES[1][0]:
+                    self.tgBot.sendMessage(user.telegram_id, 'Выберите временной интервал для построения столбчатой диаграммы', reply_markup=createRowKeyboard(TIMEPERIOD_CHOICES))
+                elif reply_data == STARTING_CHOICES[2][0]:
+                    self.tgBot.sendMessage(user.telegram_id, 'Выберите временной интервал для построения круговой диаграммы', reply_markup=createRowKeyboard(TIMEPERIOD_CHOICES))
+            
+            elif escort_message == CALLBACK_MESSAGES[2]:
+                PlotCreator(user = user).createBarPlot(timeperiod = reply_data)
+
+            elif escort_message == CALLBACK_MESSAGES[3]:
+                PlotCreator(user = user).createPiePlot(timeperiod = reply_data)
 
     def checkUser(self, notification):
 
@@ -157,61 +150,10 @@ class MainApiView(APIView):
             new_user = BotUser(telegram_id = int(user_id), first_name = user_first_name)
             new_user.save()
             print('New user has been created')
-            self.tgBot.sendMessage(user_id, "Greetings and welcome. You've been added to our small db. Wish you a nice stay. If you have any complaints, contact LuckySid! ;)")
-        
+
         user = BotUser.objects.get(telegram_id = int(user_id))
         return user
         
-
-    def messageHandler(self, notification, user):
-        
-        if 'callback_query' in notification:
-            self.callbackQueriesHandler(notification, user)
-
-        mess = notification.get('message')
-        if mess:
-            voice = mess.get('voice')
-            if voice:
-                file_id = voice.get('file_id')
-
-                tsr = TelegramSpeechRecognizer(file_id, os.environ.get('LAVANDA_TOKEN'))
-                response = tsr.convert_data()
-                if response:
-                    if any([voice_command in response.lower() for voice_command in VOICE_COMMANDS]):
-                        if VOICE_COMMANDS[0] in response.lower():
-                            self.tgBot.sendMessage(user.telegram_id, f"Привет, {user.first_name}")
-                        if VOICE_COMMANDS[1] in response.lower():
-                            self.tgBot.sendMessage(user.telegram_id, f"Сейчас {datetime.datetime.now().strftime('%H:%M:%S')}")
-                        if VOICE_COMMANDS[2] in response.lower():
-                            self.tgBot.sendMessage(user.telegram_id, f"Мои создатели еще не придумали мне имя")
-                        if VOICE_COMMANDS[3] in response.lower():
-                            self.tgBot.sendMessage(user.telegram_id, f"Пока, {user.first_name}")
-                    else:
-                        self.tgBot.sendMessage(user.telegram_id, f"Google Speech Recognition считает, что ты сказал: {response}")
-                else:
-                    self.tgBot.sendMessage(user.telegram_id, f"Google Speech Recognition could not understand audio")
-
-
-            elif notification['message'].get('reply_to_message') and notification['message']['reply_to_message'].get('text') == 'Specify the amount spent':
-                try:
-                    amount = float(notification['message'].get('text'))
-                    if Expense.objects.filter(user = user, added = False).exists():
-                        latest_expense = Expense.objects.get(user = user, added = False)
-                        latest_expense.amount = amount
-                        latest_expense.added = True
-                        latest_expense.save()
-                        BotUserProfile.objects.get(user = user).expenses.add(latest_expense)
-                        self.tgBot.sendMessage(user.telegram_id, "Your data has been added to the database!")
-                    else:
-                        print('No unadded expenses')
-                except Exception as e:
-                    print(e)
-                    self.tgBot.sendMessage(user.telegram_id, "You've been providing wrong data!")
-            else:
-                if Expense.objects.filter(user = user, added = False).exists():
-                    Expense.objects.filter(user = user, added = False).delete()
-
-
     def get(self, request, *args, **kwargs):
         return(HttpResponse('Tracker Api!'))
 
@@ -219,24 +161,15 @@ class MainApiView(APIView):
     def post(self, request, *args, **kwargs):
 
         notification = json.loads(request.body)
-        
         user = self.checkUser(notification)
 
-        
-
+        self.returnGreetingMessage(notification = notification, user = user)
         self.returnCategoryKeyboard(notification = notification, user = user)
         self.returnStartingKeyboard(notification = notification, user = user)
         self.returnPlotKeyboard(notification = notification, user = user)
-
-        self.messageHandler(notification, user)
-
-        ### For admin
-
-        self.returnSubscribersList(notification = notification, user = user)
-        self.sendGroupMessage(notification = notification, user = user)
-        
-        print(user.first_name)
-        print(json.dumps(notification, indent=4))
+        self.returnWeekStatistics(notification = notification, user = user)
+        self.pushDataToPostgres(notification = notification, user = user)
+        self.callbackQueriesHandler(notification = notification, user = user)
 
         return(JsonResponse({'status_code': 200}))
 
@@ -244,83 +177,185 @@ class MainApiView(APIView):
 
 class PlotCreator():
 
-    def __init__(self, user, plot_type):
+    def __init__(self, user):
         self.user = user
-        self.type = plot_type
         self.data = BotUserProfile.objects.get(user = user).expenses.all()
         self.labels = []
         self.plot_data = []
-        self.file_location = f'static/images/{self.type}_{self.user.telegram_id}.png'
         self.tgBot = TelegramBot()
-        if self.type == STARTING_CHOICES[1][0]:
-            self.createWeekTable()
-            self.message = 'Weekly table...'
-        elif self.type == STARTING_CHOICES[2][0]:
-            self.createBarPlot()
-            self.message = 'Bar plot...'
-        elif self.type == STARTING_CHOICES[3][0]:
-            self.createPiePlot()
-            self.message = 'Pie plot...'
-        self.tgBot.sendPhoto(user.telegram_id, self.file_location, self.message)
+        self.today = datetime.datetime.now()
 
-    def createBarPlot(self):
-        plt.clf()
-        for category in CATEGORY_CHOICES:
-            if self.data.filter(category = category[0]).exists():
-                self.labels.append(category[1])
-                self.plot_data.append(self.data.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
 
-        plt.bar(self.labels, self.plot_data)
-        plt.savefig(os.path.join(BASE_DIR, f'static/images/bar_{self.user.telegram_id}.png'))
+    def choose_data(self, timeperiod):
+
+        if timeperiod == TIMEPERIOD_CHOICES[0][0]:
+            timed_data = self.get_current_week()
+            message_data = TIMEPERIOD_CHOICES[0][1].lower()
+        elif timeperiod == TIMEPERIOD_CHOICES[1][0]:
+            timed_data = self.get_last_week()
+            message_data = TIMEPERIOD_CHOICES[1][1].lower()
+        elif timeperiod == TIMEPERIOD_CHOICES[2][0]:
+            timed_data = self.get_current_month()
+            message_data = TIMEPERIOD_CHOICES[2][1].lower()
+        elif timeperiod == TIMEPERIOD_CHOICES[3][0]:
+            timed_data = self.get_last_month()
+            message_data = TIMEPERIOD_CHOICES[3][1].lower()
+        elif timeperiod == TIMEPERIOD_CHOICES[4][0]:
+            timed_data = self.get_current_year()
+            message_data = TIMEPERIOD_CHOICES[4][1].lower()
+        return (timed_data, message_data)
+
+    def get_current_week(self):
+
+        self.today = datetime.datetime.now()
+        current_weekday = datetime.datetime.now().weekday()
+        current_week = (datetime.datetime.now() - datetime.timedelta(days = current_weekday)).date()
+        data_for_current_week = self.data.filter(date__gte = current_week)
+
+        return data_for_current_week
+
+    def get_last_week(self):
+
+        current_weekday = self.today.weekday()
+        current_week = (self.today - datetime.timedelta(days = current_weekday)).date()
+        last_week = current_week - datetime.timedelta(days = 7)
+        data_for_last_week = self.data.filter(date__gte = last_week).filter(date__lt = current_week)
         
+        return data_for_last_week
 
-    
-    def createPiePlot(self):
-        plt.clf()
-        for category in CATEGORY_CHOICES:
-            if self.data.filter(category = category[0]).exists():
-                self.labels.append(category[1])
-                self.plot_data.append(self.data.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
+    def get_current_month(self):
 
+        current_month = datetime.datetime(self.today.year, self.today.month, 1).date()
+        data_for_current_month = self.data.filter(date__gte = current_month)
         
-        fig, axs = plt.subplots(1, 2)
-        pie = axs[0].pie(self.plot_data, autopct='%.1f%%', pctdistance = 1.4)
-        axs[1].axis('off')
-        axs[1].legend(pie[0], self.labels,
-            title="Категории",
-            loc="center")
-        plt.savefig(os.path.join(BASE_DIR, f'static/images/pie_{self.user.telegram_id}.png'))
-        return('Pie plot...')
+        return data_for_current_month
 
-    def createWeekTable(self):
-        plt.clf()
-        self.labels = ['Дата'] + [category[1] for category in CATEGORY_CHOICES] + ['Итог']
+    def get_last_month(self):
 
-        for i in range(0, 6):
-            day = datetime.datetime.today().date() + datetime.timedelta(days = -i)
-            day_query = self.data.filter(date = day)
-            day_data = [day]
-            total_for_day = day_query.aggregate(total_amount = Sum('amount')).get('total_amount')
+        current_month = datetime.datetime(self.today.year, self.today.month, 1).date()
+        last_month = datetime.datetime(self.today.year, self.today.month - 1, 1).date()
+        data_for_last_month = self.data.filter(date__gte = last_month).filter(date__lt = current_month)
+        
+        return data_for_last_month
+
+    def get_current_year(self):
+
+        current_year = datetime.datetime(self.today.year, 1, 1).date()
+        data_for_current_year = self.data.filter(date__gte = current_year)
+        
+        return data_for_current_year
+            
+
+    def createBarPlot(self, timeperiod):
+        data, message = self.choose_data(timeperiod)
+        if data:
+            plt.clf()
             for category in CATEGORY_CHOICES:
-                if day_query.filter(category = category[0]).exists():
-                    day_data.append(day_query.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
-                else:
-                    day_data.append(0)
-            day_data.append(total_for_day)
-            self.plot_data.append(day_data)
+                if data.filter(category = category[0]).exists():
+                    self.labels.append(category[1])
+                    self.plot_data.append(data.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
 
-        plt.figure()
-        ax = plt.gca()
-        ax.axis('off')
-        table = plt.table(	
-            cellText = self.plot_data, colLabels = self.labels, cellLoc= 'center', loc = 'center'
-        )
-        table.scale(1, 3)
-        plt.savefig(os.path.join(BASE_DIR, f'static/images/table_{self.user.telegram_id}.png'))
-        return('Weekly table...')
+            plt.bar(self.labels, self.plot_data)
+            plt.savefig(os.path.join(BASE_DIR, f'static/images/bar_{self.user.telegram_id}.png'))
+
+            self.file_location = f'static/images/bar_{self.user.telegram_id}.png'
+            self.tgBot.sendPhoto(self.user.telegram_id, self.file_location, 'Столбчатая диаграмма '+ message)
+        else:
+            self.tgBot.sendMessage(self.user.telegram_id, 'Нет информации '+ message)
+        
+    
+    def createPiePlot(self, timeperiod):
+        data, message = self.choose_data(timeperiod)
+        if data:
+            plt.clf()
+            for category in CATEGORY_CHOICES:
+                if data.filter(category = category[0]).exists():
+                    self.labels.append(category[1])
+                    self.plot_data.append(data.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount'))
+
+            
+            fig, axs = plt.subplots(1, 2)
+            pie = axs[0].pie(self.plot_data, autopct='%.1f%%', pctdistance = 1.4)
+            axs[1].axis('off')
+            axs[1].legend(pie[0], self.labels,
+                title="Категории",
+                loc="center")
+            plt.savefig(os.path.join(BASE_DIR, f'static/images/pie_{self.user.telegram_id}.png'))
+
+            self.file_location = f'static/images/pie_{self.user.telegram_id}.png'
+            self.tgBot.sendPhoto(self.user.telegram_id, self.file_location, 'Круговая диаграмма '+ message)
+        else:
+            self.tgBot.sendMessage(self.user.telegram_id, 'Нет информации '+ message)
+
+
 
     def createWeeklyStatisticsMessage(self):
-        pass
+
+        ### Current week
+        
+        data_for_current_week = self.get_current_week()
+        total_current_week = data_for_current_week.aggregate(total_amount = Sum('amount')).get('total_amount')
+
+        ### Last week
+        
+        data_for_last_week = self.get_last_week()
+        total_last_week = data_for_last_week.aggregate(total_amount = Sum('amount')).get('total_amount')
+
+        ### Current month
+
+        current_month = self.get_current_month()
+        total_current_month = current_month.aggregate(total_amount = Sum('amount')).get('total_amount')
+
+        ### Last month
+
+        last_month = self.get_last_month()
+        total_last_month = last_month.aggregate(total_amount = Sum('amount')).get('total_amount')
+
+        ### Current year
+
+        current_year = self.get_current_year()
+        total_current_year = current_year.aggregate(total_amount = Sum('amount')).get('total_amount')
+        
+        result_week_data = {}
+        if total_last_week and total_last_week != 0:
+            response_data = data_for_last_week
+        else:
+            response_data = data_for_current_week
+
+        
+        for category in CATEGORY_CHOICES:
+            if response_data.filter(category = category[0]).exists():
+                result_week_data[category[1]] = response_data.filter(category = category[0]).aggregate(total_amount = Sum('amount')).get('total_amount')
+            else:
+                result_week_data[category[1]] = 0
+        
+        sorted_results = {k: v for k, v in sorted(result_week_data.items(), key =  lambda item: -item[1])}
+        top_expenses = list(sorted_results.items())[:3]        
+
+        if total_last_week and total_last_week != 0:
+            starting_message = f'За прошедшую неделю вами было потрачено: {total_last_week} рублей.\nСамые крупные категории затрат:\n'
+            ending_message = f'За текущую неделю вами было потрачено: {total_current_week} рублей.\n'
+        else:
+            starting_message = f'За текущую неделю вами было потрачено: {total_current_week} рублей.\nСамые крупные категории затрат:\n'
+            ending_message = f''
+
+        expenses_message = ''
+        for index, entry in enumerate(top_expenses):
+            if entry[1] != 0:
+                expenses_message += f'\t\t\t\t\t\t\t\t{index+1}. {entry[0]} {entry[1]} рублей\n'
+
+        if total_last_month and total_last_month != 0:
+            last_month_message = f'За прошлый месяц : {total_last_month} рублей\n'
+        else:
+            last_month_message = ''
+        
+        current_month_message = f'За текущий месяц : {total_current_month} рублей\n'
+        current_year_message = f'За текущий год : {total_current_year} рублей\n'
+
+        result_message = starting_message + expenses_message + ending_message + current_month_message + last_month_message + current_year_message
+
+        self.tgBot.sendMessage(self.user.telegram_id, result_message, parse_mode = 'HTML')
+        
 
 
   
